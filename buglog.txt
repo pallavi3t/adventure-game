@@ -1,0 +1,153 @@
+ - BUG LOG -
+Difficulty (0 - quicker fix, 5 - this took me a while)
+
+ 1. Screen Flicker and status bar not showing 
+ What: Whole screen was flickering and while the split was visible it was just a repaste of the room image 
+ Fix: set target_img to offset in set_mode_x instead of in show_screen 
+ Difficulty: 2
+ Where: set_mode_X() IN modex.c
+
+-- Status Bar across the next bugs still does not work properly but I went and debugged the other functions -- 
+ -- I put in a call to display_status_bar with a string to test if my text to graphics and draw_to_status() worked --
+
+ 2. graphics buffer was wrong, we were making the graphics buffer off the string input incorrectly   
+ What: Screen no longer flickers but status bar isnt visible (status bar is striped and a repeat of the image of the room) 
+ Fix: I checked out the text_to_graphics() function first to see if I was even filling my buffer correctly. The number was not
+      getting written into the buffer correctly. The mask was a signed char instead of an unsigned char so when I shifted the
+      mask I was performing arithmetic shift instead of logical so I changed the mask from signed to unsigned
+ Difficulty: 3
+ Where: text_to_graphics() IN text.c
+
+
+ 3. Plane buffers I created did not contain the correct values
+ What: I used printf to alternate between the 4 planes after I put the graphics buffers values in it accordingly
+       but it didn't match the graphics buffer so i knew i was copying into buffers incorrectly
+ Fix: When copying from graphics to the planes my index was wrong for columns, I was not increasing each index by 4
+      after doing one round of copying into an index for all planes, instead I was incrementing by one. 
+
+      Solved this by making the columns [4*j + 0] or [4*j + 1] or etc.
+ Difficulty: 1
+ Where: draw_to_status() IN modex.c
+
+-- Now we resume to solve why the status bar is not showing -- 
+
+4. Status bar incorrect
+What:  Screen is split but status bar is just top part of image and kind of stripey, it also pans when it shouldnt 
+Fix: I had not previously modified Max Scan Line and Overflow but I took another look and realized that Max Scan Line
+     should be x01 not x41 because 2*(200-18) - 1 (two scan lines per row of pixels)
+Difficulty: 3
+Where: modex.c
+
+5. "" ""
+What: "" ""
+Fix: realized that I was not starting the video memory for the image at the right place, I changed offset from 1680 to 5760
+     I have no idea why it was at 1680 originally
+Difficulty: 2
+Where: set_mode_x() IN modex.c
+
+6. Really thick black bar in middle of screen
+What: the image panned below and above the black bar but the black bar was too thick to be status bar and wrong position obviously
+Fix: changed the line compare register to 6B because I had forgotten to set it properly according to 2*(200-18) - 1
+Difficulty: 2
+Where: modex.c
+
+7. Text is reversed on status bar
+What: it said like olleh except more chaotic on the status bar
+Fix: setting the wrong plane in SET_WRITE_MASK when copying to another plane, changed the offsets in the SET_WRITE_MASK to suit
+     the plane we were copying in to 
+Difficulty: 1
+Where: draw_to_status() IN modex.c
+
+8.Entire screen goes black after implementing synchronization
+What: Program loads up then just crashes righ away, screen does not show either, there was multiple segmentation faults  
+Fix: 
+	1) checked for NULL in the text_to_graphics()
+	2) using n_char_done to calculate buffer offset to copy next char in input string but it was skyrockting and I
+	   realized that I did not need it so I used the letter offset of the loop which I pretty much should've done
+	   in the first place 
+	2) strlen CANNOT take a null string --> this was the main problem I was having bc I used strlen SO many times
+	3) looped to index 40 in display_status_bar() when the array was len 40 so we were going out of bounds 
+Difficulty: 5, despite these issues being not too bad it took me an embarassingly long time to realize that this many segfuaults 
+            existed as well as the fact that strlen cant take a NULL string
+Where: text_to_graphics() IN text.c 
+       display_status_bar() IN modex.c
+
+9. When adding underscore on status bar --> underscore disappeared after typing occurs
+What: the underscore was only there at the beginning before someone typed then it disappered
+Fix: I was setting the last element in my string to be '_' but that was getting overwritten with the typing, instead made my loop 
+     only start at the second to last element in the array reserving the last element to be the '_' character 
+Difficulty: 2
+Where: display_status_bar() IN modex.c
+
+------------------------------- 2.2--------------------------------------------------
+
+10. Buttons_pressed value from b and c in response packet were always 8ff
+What: When the button is pressed a BIOC_EVENT response is sent but a BIOC_EVENT response is also sent when the button is released, this value is 8ff 
+Fix: I only recorded the value of the button when we held it rather than when we both held and released. Implemented control logic within the BIOC_EVENT case 
+Difficulty: 3, the actual fix was not too difficult but finding the error took me some time 
+Where: tuxctl_handle_packet() IN tuxctl-ioctl.c
+
+
+11. Buttons are active low 
+What: The handle packet sends a 0 in the place of the button so the commands weren't registered because my case statements in the input.c were for active high 
+Fix: implemented control logic to make it active high 
+Difficulty: 2
+Where: tuxctl_handle_packet() IN tuxctl-ioctl.c
+
+
+12. Left and Down buttons are switched on the user side in comparison to hardware 
+What: When I clicked left the command that was sent was for down because the bytes on the handle packet are flipped, same thing with when I clicked down, left was registered 
+Fix: implemented control to flip the bits on the button response 
+Difficulty: 1 
+Where: tuxctl_handle_packet() IN tuxctl-ioctl.c
+
+13. Garbage was being displayed on the clock 
+What: Random numbers and hex was being displayed on the clock while it was still counting 
+Fix: I was not initializing my display_time variable to 0 so when I was OR-ing it with bitmasks it contained garbage
+Difficulty: 2
+Where: tux_display_time() IN adventure.c 
+
+14. Button keeps sending signal and doesn't reset when we are polling
+What: After clicking on a button it kept sending that signal and never resetting to default that no button is being pressed as if the button was being held
+Fix: Set buttons_pressed back to zero after we copied the buttons_pressed to user 
+Difficulty: 2 
+Where: tuxctl-ioctl() IN tuxctl-ioctl.c
+
+15. Screen was black with weird green dots 
+Fix: I placed my else statement for the level 2 in the wrong place
+Difficulty: 2
+Where: read_photo() IN photo.c
+
+16. Screen was super green tinted as if it was in night mode 
+Fix: I was not shifting the red and blue totals in the struct to account for the fact we needed one more bit in red and blue to make it 6 bit 
+Difficulty: 2
+Where: read_photo() IN photo.c
+
+17. Screen is not super blue tinted 
+Fix: I was not taking the right value for the RGB pixel values for each pixel, I was shifting the 4-4-4 index instead of the pixel itself so I changed it to shifting the pixel
+Difficulty: 3, not hard to fix took me a bit to find
+Where: read_photo() IN photo.c
+
+18. Level 2 pixels were halloween themed 
+Fix: I forgot to mask the level 2 bits when I calculate the level 2 index from the level four after I assign pixels to level 4
+Difficulty: 2 
+Where: read_photo() IN photo.c
+
+19. Level 2 pixels were blue
+Fix: I had copy pasted the previous code for shifting somewhere else in my code when I am going through the rest of the level 4 array to make my level 2 and forgetten to bit mask there
+Difficulty: 1, because I knew my mistake from my previous bit mask error 
+Where: read_photo() IN photo.c
+
+20. Screen was flickering big time after making my ioctl button call 
+What: when I loaded my game the screen was scrolling and flickering as if I was overriding video memory, thought it was something to do with still having my printk's in my tuxctl-ioctl.c but when i removed those nothing changed
+Fix: I was waking my tux thread in the wrong section of the game_loop() before the tik was set or the clear_mode_x() was done which is why Im assumed it flickered
+Difficulty: 5; this took me so long to find, I didn't see the asynchronous comment for the longest time and I kept thinking that I was segfaulting or it had something to do with the driver so I was running in all directions to fix when it was just my position of the code
+
+21. When I hit down or up on button there is a lag then it "scrolls" wayyy too much 
+What: I am assuming timing is off, in addition when I change rooms it just flickers or goes to two rooms over; either way the change rooms is not right so I am not updating the game state correctly
+Fix:
+Difficulty: 4
+
+
+
+
